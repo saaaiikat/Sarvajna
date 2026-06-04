@@ -4,11 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --watch src/index.tsx"
+    "dev": "bun run --watch src/index.tsx",
+    "test": "npx vitest run"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/react": "^19.2.15"
+    "@types/react": "^19.2.15",
+    "vitest": "^4.1.8"
   },
   "peerDependencies": {
     "typescript": "^5"
