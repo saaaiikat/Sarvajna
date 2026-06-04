@@ -1,7 +1,6 @@
 import { useRef, useState, useMemo, type RefObject } from "react";
 import type { ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-//import { getFilteredCommands } from "./filter-commands";
 import { getFilteredCommands } from "./filter-command";
 import type { Command } from "./types";
 import { useKeyboardLayer } from "../../providers/keyboard-layer";
@@ -46,23 +45,19 @@ export function useCommandMenu(): UseCommandMenuReturn {
     if (prefix !== null && !prefix.includes(" ")) {
       setShowCommandMenu(true);
       push("command", () => {
-        setShowCommandMenu(false);
-        pop("command");
+        close();
         return true;
       });
     } else {
-      setShowCommandMenu(false);
-      pop("command");
+      close();
     }
   };
-
 
   // Resolve a command at a specific index (returns the command, caller handles execution)
   const resolveCommand = (index: number): Command | undefined => {
     const command = filteredCommands[index];
     if (command) {
-      setShowCommandMenu(false);
-      pop("command");
+      close();
     }
     return command;
   };
@@ -70,12 +65,10 @@ export function useCommandMenu(): UseCommandMenuReturn {
   // Arrow keys move selection; the list follows along when the highlight goes off-screen
   useKeyboard((key) => {
     if (!showCommandMenu || !isTopLayer("command")) return;
-    
 
     if (key.name === "escape") {
       key.preventDefault();
-      setShowCommandMenu(false);
-      pop("command");
+      close();
     } else if (key.name === "up") {
       key.preventDefault();
       setSelectedIndex((i: number) => {

@@ -5,25 +5,46 @@ import { SearchBar } from "./components/search-bar";
 import { InputBar } from "./components/input-bar";
 import { KeyboardLayerProvider } from "./providers/keyboard-layer";
 import { ToastProvider } from "./providers/toast";
-import { ThemeProvider } from "./providers/theme";
+import { ThemeProvider ,useTheme} from "./providers/theme";
+import { DialogProvider } from "./providers/dialog";
 
-function App() {
+function Themeroot(){
+  const {colors} = useTheme();
+
   return (
-    <KeyboardLayerProvider>
-      <ThemeProvider>
-      <ToastProvider>
-      <box alignItems="center" justifyContent="center" backgroundColor="#1a1a1a" height="100%" width="100%" gap={1}>
-        <Header />
+    <box 
+      alignItems="center" 
+      justifyContent="center"
+      backgroundColor={colors.background}
+      height="100%" 
+      width="100%" 
+      gap={1}>
+      <Header />
         <box width="100%" maxWidth={78} paddingX={2}>
           <InputBar onSubmit={()=> {}}/>
         </box>
-      </box>
-      </ToastProvider>
+    </box>
+  )
+}
+
+function App() {
+  return (
+      <ThemeProvider>
+        <KeyboardLayerProvider>
+          <DialogProvider>
+            <ToastProvider>
+              <Themeroot/>
+            </ToastProvider>
+          </DialogProvider>
+        </KeyboardLayerProvider>
       </ThemeProvider>
-    </KeyboardLayerProvider>
+    
   );
 }
 
 
-const renderer = await createCliRenderer();
+const renderer = await createCliRenderer({
+  targetFps: 60,
+  exitOnCtrlC:false,
+});
 createRoot(renderer).render(<App />);

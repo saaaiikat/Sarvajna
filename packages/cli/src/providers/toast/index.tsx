@@ -11,6 +11,7 @@ import type { ToastOptions, ToastVariant } from "./types";
 import { DEFAULT_DURATION } from "./types";
 import { SplitBorderChars } from "../../components/Emptyborder";
 import { useTheme } from "../theme";
+import { color } from "bun";
 
 export type ToastContextValue = {
   show: (options: ToastOptions) => void;
@@ -110,7 +111,7 @@ function Toast({ currentToast }: ToastProps) {
       customBorderChars={SplitBorderChars}
     >
       <box flexDirection="column" gap={1} width="100%">
-        <text fg="#E1E1E1" wrapMode="word" width="100%">
+        <text fg={colors.dialogSurface} wrapMode="word" width="100%">
           {currentToast.message}
         </text>
       </box>

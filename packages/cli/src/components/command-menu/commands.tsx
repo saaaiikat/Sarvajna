@@ -1,3 +1,4 @@
+import { ThemeDialogContent } from "../dialogs";
 import type { Command } from "./types";
 export const COMMANDS: Command[] = [
   {
@@ -12,12 +13,14 @@ export const COMMANDS: Command[] = [
     name: "agents",
     description: "Switch agents",
     value: "/agents",
-    // action: (ctx) => {
-    //   ctx.dialog.open({
-    //     title: "Select Agent",
-    //     children: <AgentsDialogContent currentMode={ctx.mode} onSelectMode={ctx.setMode} />,
-    //   })
-    // },
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Select Mode",
+        children: <text> 
+          Agent selection coming soon
+        </text> ,
+      })
+    },
   },
   {
     name: "models",
@@ -50,12 +53,12 @@ export const COMMANDS: Command[] = [
     name: "theme",
     description: "Change color theme",
     value: "/theme",
-    // action: (ctx) => {
-    //   ctx.dialog.open({
-    //     title: "Select Theme",
-    //     children: <ThemeDialogContent />,
-    //   })
-    // },
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Select Theme",
+        children: <ThemeDialogContent/>,
+      })
+    },
   },
   {
     name: "login",

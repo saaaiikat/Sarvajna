@@ -28,7 +28,7 @@ type DialogProviderProps = {
 export function DialogProvider({ children }: DialogProviderProps) {
   const [currentDialog, setCurrentDialog] = useState<DialogConfig | null>(null);
   const { push, pop } = useKeyboardLayer();
-
+  
   const close = useCallback(() => {
     setCurrentDialog(null);
     pop("dialog");
