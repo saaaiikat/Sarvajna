@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { getFilteredCommands } from "./filter-command";
 import { COMMANDS } from "./commands";
-//import { color } from "bun";
+
 //import { useTheme } from "../../providers/theme";
 
 const MAX_VISIBLE_ITEMS = 8;
