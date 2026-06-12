@@ -100,7 +100,7 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
     textarea.onSubmit = () => {
       onSubmitRef.current();
     };
-  }, []);
+  }, []); 
 
   onSubmitRef.current = () => {
     if (disabled) return;
