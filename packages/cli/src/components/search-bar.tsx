@@ -1,6 +1,6 @@
 import {TextAttributes} from "@opentui/core";
 import { useTheme } from "../providers/theme";
-import { color } from "bun";
+
 
 export function SearchBar() {
     const {colors} = useTheme();
