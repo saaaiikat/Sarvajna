@@ -4,8 +4,8 @@ import { useRenderer } from "@opentui/react";
 import type { KeyBinding } from "@opentui/core";
 // import { EmptyBorder } from "./border";
 import { EmptyBorder } from "./Emptyborder";
-import { SearchBar } from "./search-bar";
 // import { StatusBar } from "./status-bar";
+import { SearchBar } from "./search-bar";
 import { CommandMenu } from "./command-menu";
 import type { Command } from "./command-menu/types";
 import { useCommandMenu } from "./command-menu/use-command-menu";
@@ -100,7 +100,7 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
     textarea.onSubmit = () => {
       onSubmitRef.current();
     };
-  }, []); 
+  }, []);
 
   onSubmitRef.current = () => {
     if (disabled) return;

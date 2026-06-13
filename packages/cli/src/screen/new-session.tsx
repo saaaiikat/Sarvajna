@@ -1,35 +1,30 @@
 import { useEffect } from "react";
-import { useNavigate, useLocation, replace } from "react-router";
-import { useTheme } from "../providers/theme";
-import { ErrorMessage,UserMessage, BotMessage} from "../components/message";
+import { useNavigate, useLocation } from "react-router";
 import { ShellSession } from "../components/shell-session";
-
+import { ErrorMessage, UserMessage, BotMessage } from "../components/message";
 
 export function NewSession() {
-    const navigate = useNavigate();
-    const location = useLocation();
-    const { colors } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
 
-const state = location.state as {message?: string } | null ;
+  const state = location.state as { message?: string } | null;
 
-    useEffect(() => {         //The useEffect block serves as a guard. If the data isn't valid (!state.success),
-    //                         it forces the user back 
-    //                         to the homepage (navigate("/")). This prevents the application
-    //                         from trying to render a session without the necessary configuration.
-        if (!state?.message) {
-            navigate("/",{replace:true});
-        }
-    }, [state, navigate]);
-
+  useEffect(() => {
     if (!state?.message) {
-    return null;
+      navigate("/", { replace: true });
     }
-    return (
-        <ShellSession OnSubmit={()=>{}} inputDisabled loading>
-           <UserMessage message={state.message}/>
-            <BotMessage Content ="This is a sample bot message."
-           model ="gemma 3.1 flash"/>
-        </ShellSession> 
-    );
+  }, [state, navigate]);
 
+  if (!state?.message) return null;
+
+  return (
+    <ShellSession onSubmit={() => {}} inputDisabled loading>
+      <UserMessage message={state.message} />
+      <BotMessage 
+        Content="This is a sample bot response to demonstrate the message layout." 
+        model="opus-4-6"
+      />
+      <ErrorMessage message="This is a sample error message." />
+    </ShellSession>
+  );
 };

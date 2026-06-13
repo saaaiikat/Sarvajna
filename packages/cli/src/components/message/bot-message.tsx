@@ -2,10 +2,10 @@ import { useTheme } from "../../providers/theme";
 
 type Props = {
     Content: string
-    message:string
+    model: string
 }
 
-export function BotMessage({message,Content}: Props){
+export function BotMessage({Content,model}: Props){
     const {colors} = useTheme();
 
     return (
@@ -20,7 +20,7 @@ export function BotMessage({message,Content}: Props){
            <box paddingX={3} paddingBottom={1} gap={1} width="100%">
                 <box flexDirection="row" gap={2}>
                     <text fg={colors.primary}>◉</text>
-                    <text>"Model"</text>
+                    <text>{model}</text>
                 </box>
            </box>
         </box>

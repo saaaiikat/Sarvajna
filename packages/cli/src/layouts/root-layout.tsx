@@ -7,16 +7,16 @@ import { Themeroot } from "./themed-root";
 
 export function Rootlayout(){
  return(
-      <ThemeProvider>
-            <KeyboardLayerProvider>
-              <DialogProvider>
-                <ToastProvider>
-                  <Themeroot>
-                    <Outlet/>
-                  </Themeroot> 
-                </ToastProvider>
-              </DialogProvider>
-            </KeyboardLayerProvider>
-       </ThemeProvider>
+     <ThemeProvider>
+       <KeyboardLayerProvider>
+         <DialogProvider>
+           <ToastProvider>
+             <Themeroot>
+               <Outlet />
+             </Themeroot>
+           </ToastProvider>
+         </DialogProvider>
+       </KeyboardLayerProvider>
+     </ThemeProvider>
  );    
 };
