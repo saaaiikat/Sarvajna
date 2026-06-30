@@ -1,0 +1,20 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "@sarvajna/shared",
+      "dependencies": {
+        "xor": "^0.1.0",
+        "zod": "^4.4.3",
+      },
+    },
+  },
+  "packages": {
+    "bignum": ["bignum@0.6.2", "", {}, "sha512-J9YgaN42HzkmhEkB+PKMGk+RHBAVPSqxxUGrWE0eOMfe7OoxJH9GXeyqifVJ9s92RR7fw6aK1/TQGN9e58aAMQ=="],
+
+    "xor": ["xor@0.1.0", "", { "dependencies": { "bignum": "~0.6.2" } }, "sha512-OSehyTwrbCEh3ZaKZf9OvXwR0WnD3XpmrzIQicIpq5JAEmkruX2dc1WDxhM/Xu5H67qRsrduUGfOUCXmWfBm7A=="],
+
+    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+  }
+}
