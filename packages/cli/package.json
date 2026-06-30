@@ -8,6 +8,7 @@
     "test": "npx vitest run"
   },
   "devDependencies": {
+    "@sarvajna/server": "workspace:*",
     "@types/bun": "latest",
     "@types/react": "^19.2.15",
     "vitest": "^4.1.8"
@@ -15,11 +16,19 @@
   "peerDependencies": {
     "typescript": "^5"
   },
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "outDir": "dist"
+  },
   "dependencies": {
     "@opentui/core": "^0.2.15",
     "@opentui/react": "^0.2.15",
+    "@sarvajna/shared": "workspace:*",
+    "hono": "^4.12.27",
     "opentui-spinner": "^0.0.7",
     "react": "^19.2.6",
-    "react-router": "^7.17.0"
+    "react-router": "^7.17.0",
+    "zod": "^4.4.3"
   }
 }
