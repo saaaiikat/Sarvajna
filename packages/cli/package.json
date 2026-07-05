@@ -22,11 +22,14 @@
     "outDir": "dist"
   },
   "dependencies": {
+    "@sarvajna/database": "workspace:*",
     "@opentui/core": "^0.2.15",
     "@opentui/react": "^0.2.15",
     "@sarvajna/shared": "workspace:*",
+    "eventsource-parser": "^3.1.0",
     "hono": "^4.12.27",
     "opentui-spinner": "^0.0.7",
+    "pretty-ms": "^9.3.0",
     "react": "^19.2.6",
     "react-router": "^7.17.0",
     "zod": "^4.4.3"
