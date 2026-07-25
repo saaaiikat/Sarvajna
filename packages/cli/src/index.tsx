@@ -1,7 +1,8 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import { Rootlayout } from "./layouts/root-layout";
+// import { Rootlayout } from "./layouts/root-layout";
+import { RootLayout } from "./layouts/root-layout";
 import { Home } from "./screen/home";
 import { NewSession } from "./screen/new-session";
 
@@ -10,7 +11,7 @@ import { Session } from "./screen/session";
 const router = createMemoryRouter([
   {
     path: "/",
-    element: <Rootlayout />,
+    element: <RootLayout />,
     children: [
       { index: true, element: <Home /> },
       { path: "sessions/new", element: <NewSession /> },

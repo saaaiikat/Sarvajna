@@ -1,22 +1,25 @@
 import { Outlet } from "react-router";
 import { ToastProvider } from "../providers/toast";
-import { ThemeProvider } from "../providers/theme";
 import { DialogProvider } from "../providers/dialog";
 import { KeyboardLayerProvider } from "../providers/keyboard-layer";
+import { ThemeProvider } from "../providers/theme";
 import { Themeroot } from "./themed-root";
+import { PromptConfigProvider } from "../providers/prompt-config";
 
-export function Rootlayout(){
- return(
-     <ThemeProvider>
-       <KeyboardLayerProvider>
-         <DialogProvider>
-           <ToastProvider>
-             <Themeroot>
-               <Outlet />
-             </Themeroot>
-           </ToastProvider>
-         </DialogProvider>
-       </KeyboardLayerProvider>
-     </ThemeProvider>
- );    
+export function RootLayout() {
+  return (
+    <ThemeProvider>
+      <ToastProvider>
+        <KeyboardLayerProvider>
+          <DialogProvider>
+            <PromptConfigProvider>
+              <Themeroot>
+                <Outlet />
+              </Themeroot>
+            </PromptConfigProvider>
+          </DialogProvider>
+        </KeyboardLayerProvider>
+      </ToastProvider>
+    </ThemeProvider>
+  );
 };
