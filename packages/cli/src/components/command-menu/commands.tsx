@@ -1,13 +1,15 @@
-import { ThemeDialogContent } from "../dialogs";
+import { SUPPORTED_CHAT_MODELS } from "@sarvajna/shared";
+import { AgentsDialogContent,ThemeDialogContent,SessionsDialogContent,ModelsDialogContent} from "../dialogs";
 import type { Command } from "./types";
+
 export const COMMANDS: Command[] = [
   {
     name: "new",
     description: "Start a new conversation",
     value: "/new",
-    // action: (ctx) => {
-    //   ctx.navigate("/");
-    // },
+    action: (ctx) => {
+      ctx.navigate("/");
+    },
   },
   {
     name: "agents",
@@ -15,10 +17,8 @@ export const COMMANDS: Command[] = [
     value: "/agents",
     action: (ctx) => {
       ctx.dialog.open({
-        title: "Select Mode",
-        children: <text> 
-          Agent selection coming soon
-        </text> ,
+        title: "Select Agent",
+        children:<AgentsDialogContent currentMode={ctx.mode} onSelectMode={ctx.setMode}/>
       })
     },
   },
@@ -26,28 +26,28 @@ export const COMMANDS: Command[] = [
     name: "models",
     description: "Select AI model for generation",
     value: "/models",
-    // action: (ctx) => {
-    //   ctx.dialog.open({
-    //     title: "Select Model",
-    //     children: (
-    //       <ModelsDialogContent
-    //         models={SUPPORTED_CHAT_MODELS.map((model) => model.id)}
-    //         onSelectModel={ctx.setModel}
-    //       />
-    //     ),
-    //   })
-    // },
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Select Model",
+        children: (
+          <ModelsDialogContent
+            models={SUPPORTED_CHAT_MODELS.map((model) => model.id)}
+            onSelectModel={ctx.setModel}
+          />
+        ),
+      })
+    },
   },
   {
     name: "sessions",
     description: "Browse past sessions",
     value: "/sessions",
-    // action: (ctx) => {
-    //   ctx.dialog.open({
-    //     title: "Sessions",
-    //     children: <SessionsDialogContent />,
-    //   })
-    // },
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Sessions",
+        children: <SessionsDialogContent />,
+      })
+    },
   },
   {
     name: "theme",

@@ -1,15 +1,20 @@
 import {TextAttributes} from "@opentui/core";
 import { useTheme } from "../providers/theme";
-
+import { usePromptConfig } from "../providers/prompt-config";
+import { Mode } from "@sarvajna/database/enums";
 
 export function SearchBar() {
+    const {mode,model} = usePromptConfig();
     const {colors} = useTheme();
     return (
         <box flexDirection="row" gap={1}>
-            <text fg={colors.primary}>Build</text>
-            <text attributes={TextAttributes.DIM} fg={colors.dimSeparator}></text>
-            <text>gema4.0</text>
-        </box>
-
-    );
-}
+            <text fg={mode===Mode.PLAN ? colors.planMode: colors.primary}>
+                {mode=== Mode.PLAN ? "Plan": "Build"}
+            </text>
+            <text attributes={TextAttributes.DIM} fg={colors.dimSeparator}>
+        ›
+      </text>
+      <text>{model}</text>
+    </box>
+  );
+};
