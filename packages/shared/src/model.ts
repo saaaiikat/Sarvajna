@@ -3,7 +3,7 @@ export type ModelPricing = {
   outputUsdPerMillionTokens: number;
 };
 
-export type SupportedProvider = "anthropic" | "openai" | "google";
+export type SupportedProvider = "anthropic" | "openai" | "google"|"groq";
 
 type SupportedChatModelDefinition = {
   id: string;
@@ -12,6 +12,14 @@ type SupportedChatModelDefinition = {
 };
 
 export const SUPPORTED_CHAT_MODELS = [
+  {
+  id: "openai/gpt-oss-120b",
+  provider: "groq",
+  pricing: {
+    inputUsdPerMillionTokens: 0,
+    outputUsdPerMillionTokens: 0,
+    },
+  },
   {
     id: "claude-sonnet-4-6",
     provider: "anthropic",
@@ -77,4 +85,4 @@ export function findSupportedChatModel(modelId: string) {
   return SUPPORTED_CHAT_MODELS.find((model) => model.id === modelId);
 }
 
-export const DEFAULT_CHAT_MODEL_ID: SupportedChatModelId = "gemini-3.5-flash";
+export const DEFAULT_CHAT_MODEL_ID: SupportedChatModelId = "openai/gpt-oss-120b";

@@ -31,9 +31,9 @@ export const TEXTAREA_KEY_BINDINGS: KeyBinding[] = [
 ];
 
 export function InputBar({ onSubmit, disabled = false }: Props) {
-  const {mode,toggleMode, setMode, setModel} = usePromptConfig();
+  const { mode, toggleMode, setMode, setModel } = usePromptConfig();
   const textareaRef = useRef<TextareaRenderable>(null);
-  const onSubmitRef = useRef<() => void>(() => {});
+  const onSubmitRef = useRef<() => void>(() => { });
   const renderer = useRenderer();
   const toast = useToast();
   const dialog = useDialog();
@@ -92,7 +92,7 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
     } else {
       textarea.insertText(command.value + " ");
     }
-  }, [renderer, toast, dialog,navigate,mode,setMode,setModel]);
+  }, [renderer, toast, dialog, navigate, mode, setMode, setModel]);
 
   const handleCommandExecute = useCallback(
     (index: number) => {
@@ -124,10 +124,10 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
     handleSubmit();
   };
 
-  useKeyboard((key)=>{
+  useKeyboard((key) => {
     if (disabled) return;
-    if(!isTopLayer("base")) return;
-    if (key.name === "tab"){
+    if (!isTopLayer("base")) return;
+    if (key.name === "tab") {
       key.preventDefault();
       toggleMode();
     }
@@ -152,7 +152,7 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
     <box width="100%" alignItems="center">
       <box
         border={["left"]}
-        borderColor={mode==Mode.BUILD ? colors.primary : colors.planMode}
+        borderColor={mode == Mode.BUILD ? colors.primary : colors.planMode}
         customBorderChars={{
           ...EmptyBorder,
           vertical: "┃",
@@ -190,7 +190,7 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
           <textarea
             ref={textareaRef}
             focused={
-              !disabled && 
+              !disabled &&
               (isTopLayer("base") || isTopLayer("command"))
             }
             keyBindings={TEXTAREA_KEY_BINDINGS}
