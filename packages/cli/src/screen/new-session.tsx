@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import {z} from "zod";
-import {DEFAULT_CHAT_MODEL_ID} from "@sarvajna/shared";
+// import { Mode } from "@sarvajna/databse/enums";
+import { Mode } from "@sarvajna/database/enums";
 import { useNavigate, useLocation } from "react-router";
 import { ShellSession } from "../components/shell-session";
 import { UserMessage } from "../components/message";
@@ -9,81 +10,82 @@ import {client} from "../lib/api-client";
 import {getErrorResponse} from "../lib/http-errors";
 
 const newSessionStateSchema = z.object({
-  message: z.string()
+  message: z.string(),
+  mode: z.enum(Mode),
+  model: z.string(),
 });
+
 
 export function NewSession() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
-  const hasStartedRef = useRef(false); // to cancel double useeffect calls in strict mode
-  const state = useMemo(() => {
-      const parsed = newSessionStateSchema.safeParse(location.state);
-      return parsed.success ? parsed.data : null;
-  } , [location.state])
+  const hasStartedRef = useRef(false);
 
-  //Guard to prevent direct access to this page without a message and go home instead
+  const state = useMemo(() => {
+    const parsed = newSessionStateSchema.safeParse(location.state);
+    return parsed.success ? parsed.data : null;
+  }, [location.state])
+
+  // Guard: if navigated here directly without state, go home
   useEffect(() => {
     if (!state) {
       navigate("/", { replace: true });
     }
   }, [state, navigate]);
 
-  //Screen jaha se user will be redirected after the session is created like a chat screen
+  // Create the session on mount — this screen exists to do this
   useEffect(() => {
-    if (!state|| hasStartedRef.current) return;
+    if (!state || hasStartedRef.current) return;
+
     hasStartedRef.current = true;
+
     let ignore = false;
     const createSession = async () => {
       try {
-        const response = await client.sessions.$post({
+        const res = await client.sessions.$post({
           json: {
             title: state.message.slice(0, 100),
             cwd: process.cwd(),
             initialMessage: {
               role: "USER",
               content: state.message,
-              mode: "BUILD",
-              model: DEFAULT_CHAT_MODEL_ID,
+              mode: state.mode,
+              model: state.model,
             },
           },
         });
 
         if (ignore) return;
-        if(!response.ok) {
-          throw new Error(await getErrorResponse(response));
-        }  
-        const session = await response.json();
+        if (!res.ok) {
+          throw new Error(await getErrorResponse(res));
+        }
+        const session = await res.json();
         navigate(
           `/sessions/${session.id}`,
-          { replace: true,state:{session} }
+          { replace: true, state: { session } }
         );
-        // navigate to created session if response contains id
-} 
-      catch (e) {
+      } catch (error) {
         if (ignore) return;
-
         toast.show({
           variant: "error",
-          message: e instanceof Error ? e.message: "Failed tp create session",
+          message: error instanceof Error ? error.message : "Failed to create session",
         });
-        navigate("/", { replace: true });// navigate to home if error occurs and not to keep user stuck on error page
+        navigate("/", { replace: true });
       }
     };
 
     createSession();
-
     return () => {
       ignore = true;
     };
   }, [state, navigate, toast]);
 
-  if (!state?.message) return null;
+  if (!state) return null;
 
   return (
     <ShellSession onSubmit={() => {}} inputDisabled loading>
-      <UserMessage message={state.message} />
-      
+      <UserMessage message={state.message} mode={state.mode} />
     </ShellSession>
   );
 };

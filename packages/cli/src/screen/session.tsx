@@ -5,8 +5,9 @@ import { z} from "zod";
 import prettyMs from "pretty-ms";
 import {useKeyboard} from "@opentui/react";
 import {useKeyboardLayer} from "../providers/keyboard-layer";
-import {DEFAULT_CHAT_MODEL_ID, type SupportedChatModelId} from "@sarvajna/shared";
+import {messagePartsSchema, type SupportedChatModelId} from "@sarvajna/shared";
 import type { InferResponseType } from "hono/client";
+import { usePromptConfig } from "../providers/prompt-config";
 import {UserMessage,BotMessage,ErrorMessage} from "../components/message";
 import {useToast} from "../providers/toast";
 import {client} from "../lib/api-client";
@@ -38,13 +39,20 @@ function mapDbMessages(dbMessages: SessionData["messages"]): Message[] {
       };
     }
 
+    const parsedParts = m.parts == null ? null : messagePartsSchema.safeParse(m.parts);
+    const parts: ClientMessagePart[] = parsedParts?.success
+      ? parsedParts.data.map((p) =>
+          p.type === "tool-call" ? { ...p, status: "done" as const } : p,
+        )
+      : [];
+
     return {
       id: m.id,
       role: "assistant",
       content: m.content,
       model: m.model as SupportedChatModelId,
       mode: m.mode,
-      parts: [{ type: "text", text: m.content }],
+      parts,
       ...(m.duration != null ? { duration: prettyMs(m.duration * 1000) } : {}),
       interrupted: m.status === MessageStatus.INTERRUPTED,
     };
@@ -57,7 +65,7 @@ function ChatMessage(
   }
 ) {
   if (msg.role === "user") {
-    return <UserMessage message={msg.content} />;
+    return <UserMessage message={msg.content} mode={msg.mode} />;
   }
 
   if (msg.role === "error") {
@@ -78,6 +86,7 @@ function ChatMessage(
 
 function SessionChat({ session }: { session: SessionData }) {
   const [initialMessages] = useState(() => mapDbMessages(session.messages));
+  const{mode,model} = usePromptConfig();
   const { isTopLayer } = useKeyboardLayer();
   const { messages, streaming, submit, abort, interrupt } = useChat(session.id, initialMessages);
 
@@ -97,7 +106,7 @@ function SessionChat({ session }: { session: SessionData }) {
   return (
     <ShellSession
       onSubmit={(text) =>
-        submit({ userText: text, mode: "BUILD", model: DEFAULT_CHAT_MODEL_ID })
+        submit({ userText: text, mode, model })
       }
       loading={streaming.status === "streaming"}
       interruptible={streaming.status === "streaming"}
