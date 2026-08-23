@@ -20,6 +20,7 @@ import {
   isSuppoertedChatModel,
   resolveChatModel,
 } from "../lib/models";
+import type { AuthenticatedEnv } from "../middleware/require-auth";
 
 /**
  * ============================================================
@@ -1083,7 +1084,7 @@ async function streamAIResponse(
  * ============================================================
  */
 
-const app = new Hono()
+const app = new Hono<AuthenticatedEnv>()
 
   /**
    * ==========================================================
