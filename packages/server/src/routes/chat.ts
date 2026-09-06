@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { streamText as aiStreamText, stepCountIs } from "ai";
+import {
+  streamText as aiStreamText,
+  stepCountIs,
+  type LanguageModelUsage,
+} from "ai";
+
 import { db } from "@sarvajna/database/client";
 import { Mode, MessageStatus } from "@sarvajna/database/enums";
 import type { Prisma } from "@sarvajna/database";
@@ -16,11 +21,17 @@ import {
 
 import { createTools } from "../tools";
 import { buildSystemPrompt } from "../system-prompt";
+
 import {
   isSuppoertedChatModel,
   resolveChatModel,
 } from "../lib/models";
+
 import type { AuthenticatedEnv } from "../middleware/require-auth";
+
+import { requireCreditsBalance } from "../middleware/require-credits-balance";
+import { calculateCreditsForUsage } from "../lib/credits";
+import { ingestAiUsage } from "../lib/polar";
 
 /**
  * ============================================================
@@ -79,10 +90,11 @@ function buildConversationHistory(
       return [];
     }
 
-    // Keep the existing behavior for now.
-    // We will investigate tool-only assistant messages separately
-    // if PLAN mode still has problems after the mode/cwd checks.
-    if (m.role === "ASSISTANT" && m.content.length === 0) {
+    // Do not send empty assistant messages.
+    if (
+      m.role === "ASSISTANT" &&
+      m.content.length === 0
+    ) {
       return [];
     }
 
@@ -101,7 +113,7 @@ function buildConversationHistory(
 
 /**
  * ============================================================
- * RESUME MESSAGE
+ * RESUMABLE MESSAGE
  * ============================================================
  */
 
@@ -112,9 +124,13 @@ function getResumableUserMessage(
     mode: Mode;
   }[],
 ) {
-  const lastMessage = messages[messages.length - 1];
+  const lastMessage =
+    messages[messages.length - 1];
 
-  if (!lastMessage || lastMessage.role !== "USER") {
+  if (
+    !lastMessage ||
+    lastMessage.role !== "USER"
+  ) {
     return null;
   }
 
@@ -129,14 +145,23 @@ function getResumableUserMessage(
 
 type StreamParams = {
   sessionId: string;
+  userId: string;
   model: string;
   cwd: string | null;
+
   history: {
     role: "user" | "assistant";
     content: string;
   }[];
+
   mode: Mode;
+
   abortController: AbortController;
+};
+
+type IngestUsageForMessageParams = {
+  messageId: string;
+  status: "complete" | "interrupted";
 };
 
 /**
@@ -146,11 +171,14 @@ type StreamParams = {
  */
 
 async function streamAIResponse(
-  stream: Parameters<Parameters<typeof streamSSE>[1]>[0],
+  stream: Parameters<
+    Parameters<typeof streamSSE>[1]
+  >[0],
   params: StreamParams,
 ) {
   const {
     sessionId,
+    userId,
     model,
     cwd,
     history,
@@ -161,47 +189,62 @@ async function streamAIResponse(
   const startTime = Date.now();
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
    * REQUEST DEBUG
-   * ----------------------------------------------------------
+   * ==========================================================
    */
 
   console.log("");
-  console.log("================================================");
-  console.log("              CHAT REQUEST START");
-  console.log("================================================");
+  console.log(
+    "================================================",
+  );
+  console.log(
+    "              CHAT REQUEST START",
+  );
+  console.log(
+    "================================================",
+  );
 
   console.log("Session ID:", sessionId);
+  console.log("User ID:", userId);
   console.log("Mode:", mode);
   console.log("Model:", model);
   console.log("CWD:", cwd);
-  console.log("History messages:", history.length);
+  console.log(
+    "History messages:",
+    history.length,
+  );
 
-  console.log("================================================");
+  console.log(
+    "================================================",
+  );
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
    * PLAN MODE VALIDATION
-   * ----------------------------------------------------------
-   *
-   * PLAN mode requires a cwd because all PLAN tools need
-   * a project directory.
+   * ==========================================================
    */
 
-  if (mode === Mode.PLAN && !cwd) {
+  if (
+    mode === Mode.PLAN &&
+    !cwd
+  ) {
     const errorMessage =
-      "PLAN mode requires an active project directory (cwd). " +
+      "PLAN mode requires an active project directory. " +
       "Please open or select a project before using PLAN mode.";
 
-    console.error("❌ PLAN MODE ERROR:", errorMessage);
+    console.error(
+      "❌ PLAN MODE ERROR:",
+      errorMessage,
+    );
 
     throw new Error(errorMessage);
   }
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
    * CREATE TOOLS
-   * ----------------------------------------------------------
+   * ==========================================================
    */
 
   const tools = cwd
@@ -209,7 +252,9 @@ async function streamAIResponse(
     : undefined;
 
   console.log("");
-  console.log("--------------- TOOL DEBUG ----------------");
+  console.log(
+    "--------------- TOOL DEBUG ----------------",
+  );
 
   console.log("Mode:", mode);
   console.log("CWD:", cwd);
@@ -225,16 +270,23 @@ async function streamAIResponse(
       Object.keys(tools).length,
     );
   } else {
-    console.log("Available tools: NONE");
-    console.log("Tool count: 0");
+    console.log(
+      "Available tools: NONE",
+    );
+
+    console.log(
+      "Tool count: 0",
+    );
   }
 
-  console.log("--------------------------------------------");
+  console.log(
+    "--------------------------------------------",
+  );
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
    * VERIFY PLAN TOOLS
-   * ----------------------------------------------------------
+   * ==========================================================
    */
 
   if (mode === Mode.PLAN) {
@@ -245,27 +297,36 @@ async function streamAIResponse(
       "glob",
     ];
 
-    const availableTools = tools
-      ? Object.keys(tools)
-      : [];
+    const availableTools =
+      tools
+        ? Object.keys(tools)
+        : [];
 
     const missingTools =
       expectedPlanTools.filter(
         (tool) =>
-          !availableTools.includes(tool),
+          !availableTools.includes(
+            tool,
+          ),
       );
 
-    if (missingTools.length > 0) {
+    if (
+      missingTools.length > 0
+    ) {
       const errorMessage =
         `PLAN mode tool initialization failed. ` +
-        `Missing tools: ${missingTools.join(", ")}`;
+        `Missing tools: ${missingTools.join(
+          ", ",
+        )}`;
 
       console.error(
         "❌ PLAN TOOL ERROR:",
         errorMessage,
       );
 
-      throw new Error(errorMessage);
+      throw new Error(
+        errorMessage,
+      );
     }
 
     console.log(
@@ -275,12 +336,15 @@ async function streamAIResponse(
   }
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
    * VERIFY BUILD TOOLS
-   * ----------------------------------------------------------
+   * ==========================================================
    */
 
-  if (mode === Mode.BUILD && cwd) {
+  if (
+    mode === Mode.BUILD &&
+    cwd
+  ) {
     const expectedBuildTools = [
       "readFile",
       "listDirectory",
@@ -291,17 +355,22 @@ async function streamAIResponse(
       "bash",
     ];
 
-    const availableTools = tools
-      ? Object.keys(tools)
-      : [];
+    const availableTools =
+      tools
+        ? Object.keys(tools)
+        : [];
 
     const missingTools =
       expectedBuildTools.filter(
         (tool) =>
-          !availableTools.includes(tool),
+          !availableTools.includes(
+            tool,
+          ),
       );
 
-    if (missingTools.length > 0) {
+    if (
+      missingTools.length > 0
+    ) {
       console.warn(
         "⚠️ BUILD tools missing:",
         missingTools,
@@ -315,9 +384,9 @@ async function streamAIResponse(
   }
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
    * MODEL RESOLUTION
-   * ----------------------------------------------------------
+   * ==========================================================
    */
 
   let resolvedModel: ReturnType<
@@ -331,7 +400,9 @@ async function streamAIResponse(
       );
 
     console.log("");
-    console.log("--------------- MODEL DEBUG ----------------");
+    console.log(
+      "--------------- MODEL DEBUG ----------------",
+    );
 
     console.log(
       "Requested model:",
@@ -353,7 +424,9 @@ async function streamAIResponse(
       resolvedModel.providerOptions,
     );
 
-    console.log("--------------------------------------------");
+    console.log(
+      "--------------------------------------------",
+    );
   } catch (error) {
     const message =
       error instanceof Error
@@ -371,24 +444,35 @@ async function streamAIResponse(
   }
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
    * MESSAGE PARTS
-   * ----------------------------------------------------------
+   * ==========================================================
    */
 
   const parts: MessagePart[] = [];
 
   /**
-   * ----------------------------------------------------------
+   * ==========================================================
+   * USAGE
+   * ==========================================================
+   */
+
+  let completedUsage:
+    | LanguageModelUsage
+    | null = null;
+
+  /**
+   * ==========================================================
    * INTERRUPTED MESSAGE
-   * ----------------------------------------------------------
+   * ==========================================================
    */
 
   const persistInterruptedMessage =
     async () => {
       const fullText = parts
         .filter(
-          (p) => p.type === "text",
+          (p) =>
+            p.type === "text",
         )
         .map(
           (p) => p.text,
@@ -399,11 +483,12 @@ async function streamAIResponse(
         fullText.length === 0 &&
         parts.length === 0
       ) {
-        return;
+        return null;
       }
 
       const elapsedMs =
-        Date.now() - startTime;
+        Date.now() -
+        startTime;
 
       const validatedParts:
         | Prisma.InputJsonValue
@@ -414,21 +499,142 @@ async function streamAIResponse(
             )
           : undefined;
 
-      await db.message.create({
+      return db.message.create({
         data: {
           sessionId,
+
           role: "ASSISTANT",
+
           status:
             MessageStatus.INTERRUPTED,
+
           model,
-          content: fullText,
-          parts: validatedParts,
+
+          content:
+            fullText,
+
+          parts:
+            validatedParts,
+
           mode,
+
           duration:
             Math.round(
               elapsedMs / 1000,
             ),
         },
+      });
+    };
+
+  /**
+   * ==========================================================
+   * USAGE INGESTION
+   * ==========================================================
+   */
+
+  const ingestUsageForMessage =
+    async ({
+      messageId,
+      status,
+    }: IngestUsageForMessageParams) => {
+      if (!completedUsage) {
+        return;
+      }
+
+      try {
+        const billableUsage =
+          calculateCreditsForUsage({
+            provider:
+              resolvedModel.provider,
+
+            model:
+              resolvedModel.modelId,
+
+            usage:
+              completedUsage,
+          });
+
+        console.log("");
+        console.log(
+          "--------------- USAGE DEBUG ----------------",
+        );
+
+        console.log(
+          "Message ID:",
+          messageId,
+        );
+
+        console.log(
+          "Status:",
+          status,
+        );
+
+        console.log(
+          "Provider:",
+          resolvedModel.provider,
+        );
+
+        console.log(
+          "Model:",
+          resolvedModel.modelId,
+        );
+
+        console.log(
+          "Credits:",
+          billableUsage.credits,
+        );
+
+        console.log(
+          "----------------------------------------------",
+        );
+
+        await ingestAiUsage({
+          externalCustomerId:
+            userId,
+
+          eventId:
+            `chat-message:${messageId}`,
+
+          credits:
+            billableUsage.credits,
+        });
+      } catch (error) {
+        console.error(
+          "❌ Failed to ingest Polar AI usage:",
+          {
+            error,
+            sessionId,
+            messageId,
+            userId,
+            status,
+          },
+        );
+      }
+    };
+
+  /**
+   * ==========================================================
+   * INTERRUPTED MESSAGE + USAGE
+   * ==========================================================
+   */
+
+  const persistInterruptedMessageAndUsage =
+    async () => {
+      const interruptedMessage =
+        await persistInterruptedMessage();
+
+      if (
+        !interruptedMessage
+      ) {
+        return;
+      }
+
+      await ingestUsageForMessage({
+        messageId:
+          interruptedMessage.id,
+
+        status:
+          "interrupted",
       });
     };
 
@@ -466,7 +672,7 @@ async function streamAIResponse(
 
     /**
      * --------------------------------------------------------
-     * BUILD SYSTEM PROMPT
+     * SYSTEM PROMPT
      * --------------------------------------------------------
      */
 
@@ -511,33 +717,48 @@ async function streamAIResponse(
 
     /**
      * --------------------------------------------------------
-     * AI STREAM
+     * AI SDK
      * --------------------------------------------------------
      */
 
-    const result = aiStreamText({
-      model: resolvedModel.model,
+    const result =
+      aiStreamText({
+        model:
+          resolvedModel.model,
 
-      system: systemPrompt,
+        system:
+          systemPrompt,
 
-      messages: history,
+        messages:
+          history,
 
-      tools,
+        tools,
 
-      /**
-       * If tools exist, allow multiple
-       * tool/model steps.
-       */
-      stopWhen: tools
-        ? stepCountIs(50)
-        : undefined,
+        stopWhen:
+          tools
+            ? stepCountIs(50)
+            : undefined,
 
-      abortSignal:
-        abortController.signal,
+        abortSignal:
+          abortController.signal,
 
-      providerOptions:
-        resolvedModel.providerOptions,
-    });
+        providerOptions:
+          resolvedModel.providerOptions,
+
+        onFinish(event) {
+          completedUsage =
+            event.totalUsage;
+
+          console.log("");
+          console.log(
+            "📊 AI USAGE RECEIVED",
+          );
+
+          console.log(
+            completedUsage,
+          );
+        },
+      });
 
     /**
      * --------------------------------------------------------
@@ -546,9 +767,12 @@ async function streamAIResponse(
      */
 
     for await (
-      const part of result.fullStream
+      const part of
+        result.fullStream
     ) {
-      if (stream.aborted) {
+      if (
+        stream.aborted
+      ) {
         console.log(
           "⚠️ Stream aborted by client.",
         );
@@ -557,7 +781,9 @@ async function streamAIResponse(
       }
 
       /**
+       * ======================================================
        * REASONING
+       * ======================================================
        */
 
       if (
@@ -578,8 +804,11 @@ async function streamAIResponse(
             part.text;
         } else {
           parts.push({
-            type: "reasoning",
-            text: part.text,
+            type:
+              "reasoning",
+
+            text:
+              part.text,
           });
         }
 
@@ -587,7 +816,9 @@ async function streamAIResponse(
           ChatStreamEvent = {
           type:
             "reasoning-delta",
-          text: part.text,
+
+          text:
+            part.text,
         };
 
         await stream.writeSSE({
@@ -602,7 +833,9 @@ async function streamAIResponse(
       }
 
       /**
+       * ======================================================
        * TEXT
+       * ======================================================
        */
 
       if (
@@ -623,8 +856,11 @@ async function streamAIResponse(
             part.text;
         } else {
           parts.push({
-            type: "text",
-            text: part.text,
+            type:
+              "text",
+
+            text:
+              part.text,
           });
         }
 
@@ -632,7 +868,9 @@ async function streamAIResponse(
           ChatStreamEvent = {
           type:
             "text-delta",
-          text: part.text,
+
+          text:
+            part.text,
         };
 
         await stream.writeSSE({
@@ -647,7 +885,9 @@ async function streamAIResponse(
       }
 
       /**
+       * ======================================================
        * TOOL CALL
+       * ======================================================
        */
 
       if (
@@ -727,7 +967,9 @@ async function streamAIResponse(
       }
 
       /**
+       * ======================================================
        * TOOL RESULT
+       * ======================================================
        */
 
       if (
@@ -764,7 +1006,8 @@ async function streamAIResponse(
             ): p is Extract<
               MessagePart,
               {
-                type: "tool-call";
+                type:
+                  "tool-call";
               }
             > =>
               p.type ===
@@ -773,7 +1016,9 @@ async function streamAIResponse(
                 part.toolCallId,
           );
 
-        if (tcPart) {
+        if (
+          tcPart
+        ) {
           tcPart.result =
             resultStr;
         }
@@ -802,7 +1047,9 @@ async function streamAIResponse(
       }
 
       /**
+       * ======================================================
        * AI ERROR
+       * ======================================================
        */
 
       if (
@@ -823,9 +1070,9 @@ async function streamAIResponse(
     }
 
     /**
-     * --------------------------------------------------------
+     * ==========================================================
      * ABORT CHECK
-     * --------------------------------------------------------
+     * ==========================================================
      */
 
     if (
@@ -837,29 +1084,31 @@ async function streamAIResponse(
         "⚠️ AI response interrupted.",
       );
 
-      await persistInterruptedMessage();
+      await persistInterruptedMessageAndUsage();
 
       return;
     }
 
     /**
-     * --------------------------------------------------------
+     * ==========================================================
      * SAVE ASSISTANT MESSAGE
-     * --------------------------------------------------------
+     * ==========================================================
      */
 
     const elapsedMs =
-      Date.now() - startTime;
+      Date.now() -
+      startTime;
 
-    const fullText = parts
-      .filter(
-        (p) =>
-          p.type === "text",
-      )
-      .map(
-        (p) => p.text,
-      )
-      .join("");
+    const fullText =
+      parts
+        .filter(
+          (p) =>
+            p.type === "text",
+        )
+        .map(
+          (p) => p.text,
+        )
+        .join("");
 
     const validatedParts:
       | Prisma.InputJsonValue
@@ -930,14 +1179,29 @@ async function streamAIResponse(
     );
 
     /**
-     * --------------------------------------------------------
+     * ==========================================================
+     * INGEST USAGE
+     * ==========================================================
+     */
+
+    await ingestUsageForMessage({
+      messageId:
+        assistantMessage.id,
+
+      status:
+        "complete",
+    });
+
+    /**
+     * ==========================================================
      * DONE EVENT
-     * --------------------------------------------------------
+     * ==========================================================
      */
 
     const doneEvent:
       ChatStreamEvent = {
-      type: "done",
+      type:
+        "done",
 
       messageId:
         assistantMessage.id,
@@ -947,7 +1211,8 @@ async function streamAIResponse(
     };
 
     await stream.writeSSE({
-      event: "done",
+      event:
+        "done",
 
       data:
         JSON.stringify(
@@ -956,9 +1221,9 @@ async function streamAIResponse(
     });
   } catch (err) {
     /**
-     * --------------------------------------------------------
+     * ==========================================================
      * ERROR HANDLING
-     * --------------------------------------------------------
+     * ==========================================================
      */
 
     if (
@@ -969,7 +1234,7 @@ async function streamAIResponse(
         "⚠️ Request aborted.",
       );
 
-      await persistInterruptedMessage();
+      await persistInterruptedMessageAndUsage();
 
       return;
     }
@@ -983,9 +1248,11 @@ async function streamAIResponse(
     console.error(
       "================================================",
     );
+
     console.error(
       "              ❌ AI REQUEST ERROR",
     );
+
     console.error(
       "================================================",
     );
@@ -993,6 +1260,11 @@ async function streamAIResponse(
     console.error(
       "Session:",
       sessionId,
+    );
+
+    console.error(
+      "User:",
+      userId,
     );
 
     console.error(
@@ -1026,7 +1298,7 @@ async function streamAIResponse(
 
     /**
      * --------------------------------------------------------
-     * SAVE ERROR TO DATABASE
+     * SAVE ERROR MESSAGE
      * --------------------------------------------------------
      */
 
@@ -1035,7 +1307,8 @@ async function streamAIResponse(
         data: {
           sessionId,
 
-          role: "ERROR",
+          role:
+            "ERROR",
 
           status:
             MessageStatus.COMPLETE,
@@ -1063,12 +1336,15 @@ async function streamAIResponse(
 
     const errorEvent:
       ChatStreamEvent = {
-      type: "error",
+      type:
+        "error",
+
       message,
     };
 
     await stream.writeSSE({
-      event: "error",
+      event:
+        "error",
 
       data:
         JSON.stringify(
@@ -1084,216 +1360,678 @@ async function streamAIResponse(
  * ============================================================
  */
 
-const app = new Hono<AuthenticatedEnv>()
+const app =
+  new Hono<AuthenticatedEnv>()
 
-  /**
-   * ==========================================================
-   * RESUME
-   * ==========================================================
-   */
+    /**
+     * ========================================================
+     * RESUME
+     * ========================================================
+     */
 
-  .post(
-    "/:sessionId/resume",
-    async (c) => {
-      const sessionId =
-        c.req.param(
-          "sessionId",
+    .post(
+      "/:sessionId/resume",
+      async (c) => {
+        const sessionId =
+          c.req.param(
+            "sessionId",
+          );
+
+        const userId =
+          c.get("userId");
+
+        console.log("");
+        console.log(
+          "========== RESUME REQUEST ==========",
         );
 
-      console.log("");
-      console.log(
-        "========== RESUME REQUEST ==========",
-      );
+        console.log(
+          "Session ID:",
+          sessionId,
+        );
 
-      console.log(
-        "Session ID:",
-        sessionId,
-      );
+        console.log(
+          "User ID:",
+          userId,
+        );
 
-      const session =
-        await db.session.findUnique({
-          where: {
-            id: sessionId,
-          },
+        /**
+         * ----------------------------------------------------
+         * LOAD SESSION
+         * ----------------------------------------------------
+         *
+         * Important:
+         * Session ownership is checked using userId.
+         */
 
-          include: {
-            messages: {
-              orderBy: {
-                createdAt:
-                  "asc",
+        const session =
+          await db.session.findUnique(
+            {
+              where: {
+                id: sessionId,
+
+                userId,
+              },
+
+              include: {
+                messages: {
+                  orderBy: {
+                    createdAt:
+                      "asc",
+                  },
+                },
               },
             },
+          );
+
+        if (!session) {
+          console.error(
+            "❌ Session not found:",
+            sessionId,
+          );
+
+          return c.json(
+            {
+              error:
+                "Session not found",
+            },
+            404,
+          );
+        }
+
+        /**
+         * ----------------------------------------------------
+         * FIND RESUMABLE MESSAGE
+         * ----------------------------------------------------
+         */
+
+        const resumableMessage =
+          getResumableUserMessage(
+            session.messages,
+          );
+
+        if (
+          !resumableMessage
+        ) {
+          return c.json(
+            {
+              error:
+                "Session has no pending user message to resume",
+            },
+            409,
+          );
+        }
+
+        /**
+         * ----------------------------------------------------
+         * MODEL VALIDATION
+         * ----------------------------------------------------
+         */
+
+        if (
+          !isSuppoertedChatModel(
+            resumableMessage.model,
+          )
+        ) {
+          return c.json(
+            {
+              error:
+                `Session uses unsupported model: ${resumableMessage.model}`,
+            },
+            409,
+          );
+        }
+
+        /**
+         * ----------------------------------------------------
+         * PLAN RESUME VALIDATION
+         * ----------------------------------------------------
+         */
+
+        if (
+          resumableMessage.mode ===
+            Mode.PLAN &&
+          !session.cwd
+        ) {
+          return c.json(
+            {
+              error:
+                "Cannot resume PLAN mode without a project directory.",
+
+              code:
+                "PLAN_CWD_REQUIRED",
+            },
+            400,
+          );
+        }
+
+        /**
+         * ----------------------------------------------------
+         * PREVENT DUPLICATE RESUMES
+         * ----------------------------------------------------
+         */
+
+        if (
+          activeResumeSessionIds.has(
+            sessionId,
+          )
+        ) {
+          return c.json(
+            {
+              error:
+                "Session already has an active resume",
+            },
+            409,
+          );
+        }
+
+        activeResumeSessionIds.add(
+          sessionId,
+        );
+
+        /**
+         * ----------------------------------------------------
+         * HISTORY
+         * ----------------------------------------------------
+         */
+
+        const history =
+          buildConversationHistory(
+            session.messages,
+          );
+
+        /**
+         * ----------------------------------------------------
+         * ABORT CONTROLLER
+         * ----------------------------------------------------
+         */
+
+        const abortController =
+          new AbortController();
+
+        try {
+          return streamSSE(
+            c,
+
+            async (stream) => {
+              stream.onAbort(
+                () => {
+                  console.log(
+                    "⚠️ Resume client aborted request",
+                  );
+
+                  abortController.abort();
+                },
+              );
+
+              try {
+                console.log(
+                  "▶️ Resuming session",
+                );
+
+                console.log(
+                  "Mode:",
+                  resumableMessage.mode,
+                );
+
+                console.log(
+                  "Model:",
+                  resumableMessage.model,
+                );
+
+                console.log(
+                  "CWD:",
+                  session.cwd,
+                );
+
+                await streamAIResponse(
+                  stream,
+                  {
+                    sessionId,
+
+                    userId,
+
+                    model:
+                      resumableMessage.model,
+
+                    cwd:
+                      session.cwd,
+
+                    history,
+
+                    mode:
+                      resumableMessage.mode,
+
+                    abortController,
+                  },
+                );
+              } finally {
+                activeResumeSessionIds.delete(
+                  sessionId,
+                );
+              }
+            },
+
+            async (
+              err,
+              stream,
+            ) => {
+              activeResumeSessionIds.delete(
+                sessionId,
+              );
+
+              const message =
+                err instanceof Error
+                  ? err.message
+                  : String(err);
+
+              console.error(
+                "❌ RESUME STREAM ERROR:",
+                err,
+              );
+
+              const errorEvent:
+                ChatStreamEvent = {
+                type:
+                  "error",
+
+                message,
+              };
+
+              await stream.writeSSE({
+                event:
+                  "error",
+
+                data:
+                  JSON.stringify(
+                    errorEvent,
+                  ),
+              });
+            },
+          );
+        } catch (error) {
+          activeResumeSessionIds.delete(
+            sessionId,
+          );
+
+          throw error;
+        }
+      },
+    )
+
+    /**
+     * ========================================================
+     * NEW CHAT MESSAGE
+     * ========================================================
+     */
+
+    .post(
+      "/:sessionId",
+      requireCreditsBalance,
+      submitValidator,
+      async (c) => {
+        const sessionId =
+          c.req.param(
+            "sessionId",
+          );
+
+        const userId =
+          c.get("userId");
+
+        console.log("");
+        console.log(
+          "========== NEW CHAT REQUEST ==========",
+        );
+
+        console.log(
+          "Session ID:",
+          sessionId,
+        );
+
+        console.log(
+          "User ID:",
+          userId,
+        );
+
+        /**
+         * ----------------------------------------------------
+         * LOAD SESSION
+         * ----------------------------------------------------
+         */
+
+        const session =
+          await db.session.findUnique(
+            {
+              where: {
+                id: sessionId,
+
+                userId,
+              },
+
+              include: {
+                messages: {
+                  orderBy: {
+                    createdAt:
+                      "asc",
+                  },
+                },
+              },
+            },
+          );
+
+        if (!session) {
+          console.error(
+            "❌ Session not found:",
+            sessionId,
+          );
+
+          return c.json(
+            {
+              error:
+                "Session not found",
+            },
+            404,
+          );
+        }
+
+        /**
+         * ----------------------------------------------------
+         * VALIDATED REQUEST
+         * ----------------------------------------------------
+         */
+
+        const data =
+          c.req.valid("json");
+
+        console.log("");
+        console.log(
+          "--------------- INCOMING DATA ----------------",
+        );
+
+        console.log(
+          "Requested mode:",
+          data.mode,
+        );
+
+        console.log(
+          "Requested model:",
+          data.model,
+        );
+
+        console.log(
+          "Session cwd:",
+          session.cwd,
+        );
+
+        console.log(
+          "Content:",
+          data.content,
+        );
+
+        console.log(
+          "Content length:",
+          data.content.length,
+        );
+
+        console.log(
+          "------------------------------------------------",
+        );
+
+        /**
+         * ----------------------------------------------------
+         * PLAN MODE CHECK
+         * ----------------------------------------------------
+         */
+
+        if (
+          data.mode === Mode.PLAN &&
+          !session.cwd
+        ) {
+          console.error(
+            "❌ PLAN REQUEST REJECTED: No CWD",
+          );
+
+          return c.json(
+            {
+              error:
+                "PLAN mode requires an active project directory. " +
+                "Please open/select a project before using PLAN mode.",
+
+              code:
+                "PLAN_CWD_REQUIRED",
+
+              mode:
+                data.mode,
+
+              cwd:
+                session.cwd,
+            },
+            400,
+          );
+        }
+
+        /**
+         * ----------------------------------------------------
+         * MODE DEBUG
+         * ----------------------------------------------------
+         */
+
+        if (
+          data.mode === Mode.PLAN
+        ) {
+          console.log(
+            "🧠 PLAN MODE REQUEST CONFIRMED",
+          );
+        } else if (
+          data.mode === Mode.BUILD
+        ) {
+          console.log(
+            "🔨 BUILD MODE REQUEST CONFIRMED",
+          );
+        } else {
+          console.error(
+            "❌ UNKNOWN MODE:",
+            data.mode,
+          );
+
+          return c.json(
+            {
+              error:
+                `Unknown mode: ${data.mode}`,
+            },
+            400,
+          );
+        }
+
+        /**
+         * ----------------------------------------------------
+         * MODEL VALIDATION
+         * ----------------------------------------------------
+         */
+
+        if (
+          !isSuppoertedChatModel(
+            data.model,
+          )
+        ) {
+          console.error(
+            "❌ Unsupported model:",
+            data.model,
+          );
+
+          return c.json(
+            {
+              error:
+                `Unsupported model: ${data.model}`,
+            },
+            400,
+          );
+        }
+
+        console.log(
+          "✅ Model is supported:",
+          data.model,
+        );
+
+        /**
+         * ----------------------------------------------------
+         * SAVE USER MESSAGE
+         * ----------------------------------------------------
+         */
+
+        await db.message.create({
+          data: {
+            sessionId,
+
+            role:
+              "USER",
+
+            status:
+              MessageStatus.COMPLETE,
+
+            model:
+              data.model,
+
+            content:
+              data.content,
+
+            mode:
+              data.mode,
           },
         });
 
-      if (!session) {
-        console.error(
-          "❌ Session not found:",
-          sessionId,
+        /**
+         * ----------------------------------------------------
+         * BUILD HISTORY
+         * ----------------------------------------------------
+         */
+
+        const history =
+          buildConversationHistory([
+            ...session.messages,
+
+            {
+              role:
+                "USER" as const,
+
+              content:
+                data.content,
+
+              status:
+                MessageStatus.COMPLETE,
+            },
+          ]);
+
+        console.log(
+          "Conversation history messages:",
+          history.length,
         );
 
-        return c.json(
-          {
-            error:
-              "Session not found",
-          },
-          404,
-        );
-      }
+        /**
+         * ----------------------------------------------------
+         * ABORT CONTROLLER
+         * ----------------------------------------------------
+         */
 
-      const resumableMessage =
-        getResumableUserMessage(
-          session.messages,
-        );
+        const abortController =
+          new AbortController();
 
-      if (!resumableMessage) {
-        return c.json(
-          {
-            error:
-              "Session has no pending user message to resume",
-          },
-          409,
-        );
-      }
+        /**
+         * ----------------------------------------------------
+         * START SSE
+         * ----------------------------------------------------
+         */
 
-      if (
-        !isSuppoertedChatModel(
-          resumableMessage.model,
-        )
-      ) {
-        return c.json(
-          {
-            error:
-              `Session uses unsupported model: ${resumableMessage.model}`,
-          },
-          409,
-        );
-      }
-
-      if (
-        activeResumeSessionIds.has(
-          sessionId,
-        )
-      ) {
-        return c.json(
-          {
-            error:
-              "Session already has an active resume",
-          },
-          409,
-        );
-      }
-
-      /**
-       * PLAN resume validation
-       */
-
-      if (
-        resumableMessage.mode ===
-          Mode.PLAN &&
-        !session.cwd
-      ) {
-        return c.json(
-          {
-            error:
-              "Cannot resume PLAN mode without a project directory.",
-            code:
-              "PLAN_CWD_REQUIRED",
-          },
-          400,
-        );
-      }
-
-      activeResumeSessionIds.add(
-        sessionId,
-      );
-
-      const history =
-        buildConversationHistory(
-          session.messages,
-        );
-
-      const abortController =
-        new AbortController();
-
-      try {
         return streamSSE(
           c,
 
           async (stream) => {
             stream.onAbort(
               () => {
+                console.log(
+                  "⚠️ Client aborted request",
+                );
+
                 abortController.abort();
               },
             );
 
-            try {
-              console.log(
-                "▶️ Resuming session",
-              );
+            /**
+             * Final confirmation before AI call.
+             */
 
-              console.log(
-                "Mode:",
-                resumableMessage.mode,
-              );
+            console.log("");
+            console.log(
+              "========== FINAL AI REQUEST ==========",
+            );
 
-              console.log(
-                "Model:",
-                resumableMessage.model,
-              );
+            console.log(
+              "Mode:",
+              data.mode,
+            );
 
-              console.log(
-                "CWD:",
-                session.cwd,
-              );
+            console.log(
+              "Model:",
+              data.model,
+            );
 
-              await streamAIResponse(
-                stream,
-                {
-                  sessionId,
+            console.log(
+              "CWD:",
+              session.cwd,
+            );
 
-                  model:
-                    resumableMessage.model,
+            console.log(
+              "User:",
+              userId,
+            );
 
-                  cwd:
-                    session.cwd,
+            console.log(
+              "======================================",
+            );
 
-                  history,
-
-                  mode:
-                    resumableMessage.mode,
-
-                  abortController,
-                },
-              );
-            } finally {
-              activeResumeSessionIds.delete(
+            await streamAIResponse(
+              stream,
+              {
                 sessionId,
-              );
-            }
+
+                userId,
+
+                model:
+                  data.model,
+
+                cwd:
+                  session.cwd,
+
+                history,
+
+                mode:
+                  data.mode,
+
+                abortController,
+              },
+            );
           },
 
           async (
             err,
             stream,
           ) => {
-            activeResumeSessionIds.delete(
-              sessionId,
-            );
-
             const message =
               err instanceof Error
                 ? err.message
                 : String(err);
 
+            console.error("");
             console.error(
-              "❌ RESUME STREAM ERROR:",
+              "❌ SSE STREAM ERROR:",
               err,
             );
 
             const errorEvent:
               ChatStreamEvent = {
-              type: "error",
+              type:
+                "error",
+
               message,
             };
 
@@ -1308,381 +2046,7 @@ const app = new Hono<AuthenticatedEnv>()
             });
           },
         );
-      } catch (error) {
-        activeResumeSessionIds.delete(
-          sessionId,
-        );
-
-        throw error;
-      }
-    },
-  )
-
-  /**
-   * ==========================================================
-   * NEW CHAT MESSAGE
-   * ==========================================================
-   */
-
-  .post(
-    "/:sessionId",
-    submitValidator,
-    async (c) => {
-      const sessionId =
-        c.req.param(
-          "sessionId",
-        );
-
-      console.log("");
-      console.log(
-        "========== NEW CHAT REQUEST ==========",
-      );
-
-      console.log(
-        "Session ID:",
-        sessionId,
-      );
-
-      /**
-       * ------------------------------------------------------
-       * LOAD SESSION
-       * ------------------------------------------------------
-       */
-
-      const session =
-        await db.session.findUnique({
-          where: {
-            id: sessionId,
-          },
-
-          include: {
-            messages: {
-              orderBy: {
-                createdAt:
-                  "asc",
-              },
-            },
-          },
-        });
-
-      if (!session) {
-        console.error(
-          "❌ Session not found:",
-          sessionId,
-        );
-
-        return c.json(
-          {
-            error:
-              "Session not found",
-          },
-          404,
-        );
-      }
-
-      /**
-       * ------------------------------------------------------
-       * VALIDATED REQUEST
-       * ------------------------------------------------------
-       */
-
-      const data =
-        c.req.valid("json");
-
-      console.log("");
-      console.log(
-        "--------------- INCOMING DATA ----------------",
-      );
-
-      console.log(
-        "Requested mode:",
-        data.mode,
-      );
-
-      console.log(
-        "Requested model:",
-        data.model,
-      );
-
-      console.log(
-        "Session cwd:",
-        session.cwd,
-      );
-
-      console.log(
-        "Content:",
-        data.content,
-      );
-
-      console.log(
-        "Content length:",
-        data.content.length,
-      );
-
-      console.log(
-        "------------------------------------------------",
-      );
-
-      /**
-       * ------------------------------------------------------
-       * IMPORTANT PLAN CHECK
-       * ------------------------------------------------------
-       */
-
-      if (
-        data.mode === Mode.PLAN &&
-        !session.cwd
-      ) {
-        console.error(
-          "❌ PLAN REQUEST REJECTED: No CWD",
-        );
-
-        return c.json(
-          {
-            error:
-              "PLAN mode requires an active project directory. " +
-              "Please open/select a project before using PLAN mode.",
-
-            code:
-              "PLAN_CWD_REQUIRED",
-
-            mode:
-              data.mode,
-
-            cwd:
-              session.cwd,
-          },
-          400,
-        );
-      }
-
-      /**
-       * ------------------------------------------------------
-       * MODE DEBUG
-       * ------------------------------------------------------
-       */
-
-      if (
-        data.mode === Mode.PLAN
-      ) {
-        console.log(
-          "🧠 PLAN MODE REQUEST CONFIRMED",
-        );
-      } else if (
-        data.mode === Mode.BUILD
-      ) {
-        console.log(
-          "🔨 BUILD MODE REQUEST CONFIRMED",
-        );
-      } else {
-        console.error(
-          "❌ UNKNOWN MODE:",
-          data.mode,
-        );
-
-        return c.json(
-          {
-            error:
-              `Unknown mode: ${data.mode}`,
-          },
-          400,
-        );
-      }
-
-      /**
-       * ------------------------------------------------------
-       * MODEL VALIDATION
-       * ------------------------------------------------------
-       */
-
-      if (
-        !isSuppoertedChatModel(
-          data.model,
-        )
-      ) {
-        console.error(
-          "❌ Unsupported model:",
-          data.model,
-        );
-
-        return c.json(
-          {
-            error:
-              `Unsupported model: ${data.model}`,
-          },
-          400,
-        );
-      }
-
-      console.log(
-        "✅ Model is supported:",
-        data.model,
-      );
-
-      /**
-       * ------------------------------------------------------
-       * SAVE USER MESSAGE
-       * ------------------------------------------------------
-       */
-
-      await db.message.create({
-        data: {
-          sessionId,
-
-          role: "USER",
-
-          status:
-            MessageStatus.COMPLETE,
-
-          model:
-            data.model,
-
-          content:
-            data.content,
-
-          mode:
-            data.mode,
-        },
-      });
-
-      /**
-       * ------------------------------------------------------
-       * BUILD HISTORY
-       * ------------------------------------------------------
-       */
-
-      const history =
-        buildConversationHistory([
-          ...session.messages,
-
-          {
-            role:
-              "USER" as const,
-
-            content:
-              data.content,
-
-            status:
-              MessageStatus.COMPLETE,
-          },
-        ]);
-
-      console.log(
-        "Conversation history messages:",
-        history.length,
-      );
-
-      /**
-       * ------------------------------------------------------
-       * ABORT CONTROLLER
-       * ------------------------------------------------------
-       */
-
-      const abortController =
-        new AbortController();
-
-      /**
-       * ------------------------------------------------------
-       * START SSE
-       * ------------------------------------------------------
-       */
-
-      return streamSSE(
-        c,
-
-        async (stream) => {
-          stream.onAbort(
-            () => {
-              console.log(
-                "⚠️ Client aborted request",
-              );
-
-              abortController.abort();
-            },
-          );
-
-          /**
-           * Final confirmation before AI call.
-           */
-
-          console.log("");
-          console.log(
-            "========== FINAL AI REQUEST ==========",
-          );
-
-          console.log(
-            "Mode:",
-            data.mode,
-          );
-
-          console.log(
-            "Model:",
-            data.model,
-          );
-
-          console.log(
-            "CWD:",
-            session.cwd,
-          );
-
-          console.log(
-            "======================================",
-          );
-
-          await streamAIResponse(
-            stream,
-            {
-              sessionId,
-
-              model:
-                data.model,
-
-              cwd:
-                session.cwd,
-
-              history,
-
-              mode:
-                data.mode,
-
-              abortController,
-            },
-          );
-        },
-
-        async (
-          err,
-          stream,
-        ) => {
-          const message =
-            err instanceof Error
-              ? err.message
-              : String(err);
-
-          console.error("");
-          console.error(
-            "❌ SSE STREAM ERROR:",
-            err,
-          );
-
-          const errorEvent:
-            ChatStreamEvent = {
-            type: "error",
-            message,
-          };
-
-          await stream.writeSSE({
-            event:
-              "error",
-
-            data:
-              JSON.stringify(
-                errorEvent,
-              ),
-          });
-        },
-      );
-    },
-  );
+      },
+    );
 
 export default app;

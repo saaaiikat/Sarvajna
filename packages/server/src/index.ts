@@ -5,6 +5,7 @@ import * as Sentry from "@sentry/hono/bun";
 import sessions from "./routes/sessions";
 import chat from "./routes/chat";
 import auth from "./routes/auth";
+import billing from "./routes/billing";
 import {requireAuth} from "./middleware/require-auth";
 
 const app = new Hono();
@@ -58,10 +59,12 @@ app.onError((error, c) => {
 
 app.use("/sessions/*", requireAuth);
 app.use("/chat/*", requireAuth);
+app.use("/billing/*", requireAuth);
 const routes = app
   .route("/auth", auth)
   .route("/sessions", sessions)
-  .route("/chat", chat).route("/auth", auth);
+  .route("/chat", chat)
+  .route("/billing", billing);
 
 export type AppType = typeof routes;
 // idleTimeout must be high, otherwise LLM tool calls might not complete
